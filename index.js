@@ -477,4 +477,131 @@ app.get("/tags", async (req, res) => {
   }
 });
 
+// Function to fetch tasks completed last week.
+
+async function getReportByLastWeek() {
+  try {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const tasks = await Task.find({
+      status: "Completed",
+      updatedAt: { $gte: sevenDaysAgo },
+    });
+    return tasks;
+  } catch (err) {
+    console.log(err);
+    throw err;
+  }
+}
+
+// API route to fetch tasks closed last week
+
+app.get("/report/last-week", async (req, res) => {
+  try {
+    const report = await getReportByLastWeek();
+    if (report.length != 0) {
+      res.status(200).json({ report });
+    } else {
+      res.status(404).json({ message: "No tasks found." });
+    }
+  } catch (err) {
+    res
+      .status(500)
+      .json({ error: "Failed to fetch tasks that were closed lastweek." });
+  }
+});
+
+// Fucntion to fetch total days of work pending for all tasks.
+
+async function getTotalPendingDays() {
+  try {
+    const pendingTasks = await Task.find({ status: { $ne: "Completed" } });
+
+    const totalDays = pendingTasks.reduce((acc, curr) => {
+      return acc + (curr.timeToComplete || 0);
+    }, 0);
+
+    return { totalDays, taskCount: pendingTasks.length };
+  } catch (err) {
+    console.log(err);
+    throw err;
+  }
+}
+
+// API route to fetch total pending work days
+
+app.get("/report/pending", async (req, res) => {
+  try {
+    const report = await getTotalPendingDays();
+    if (report) {
+      res.status(200).json({ report });
+    }
+  } catch (err) {
+    res
+      .status(500)
+      .json({ message: "Failed to calculate total pending work days" });
+  }
+});
+
+// Function to get closed tasks grouped by team , owner or project
+
+async function getClosedTasksByGroup(groupBy) {
+  try {
+    const validGroups = ["team", "owner", "project"];
+    if (!validGroups.includes(groupBy)) {
+      throw new Error("Invalid group , Must be team , owner or project");
+    }
+    const results = await Task.aggregate([
+      {
+        $match: { status: "Completed" },
+      },
+      {
+        $group: {
+          _id: `$${groupBy}`,
+          count: { $sum: 1 },
+          tasks: { $push: "$$ROOT" },
+        },
+      },
+      {
+        $sort: { count: -1 },
+      },
+    ]);
+
+    return results;
+  } catch (err) {
+    console.log(err);
+    throw err;
+  }
+}
+// API route to fetch closed tasks by team,owner or project
+app.get("/report/closed-tasks", async (req, res) => {
+  try {
+    const groupBy = req.query.groupBy || "team";
+
+    const results = await getClosedTasksByGroup(groupBy);
+
+    if (results && results.length > 0) {
+      res.status(200).json({
+        groupedBy: groupBy,
+        results: results.map((item) => ({
+          [groupBy]: item._id,
+          completedTaskCount: item.count,
+          tasks: item.tasks,
+        })),
+        totalCompleted: results.reduce((sum, item) => sum + item.count, 0),
+      });
+    } else {
+      res.status(200).json({
+        groupedBy: groupBy,
+        results: [],
+        totalCompleted: 0,
+        message: "No completed tasks found.",
+      });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch closed tasks report." });
+  }
+});
 app.listen(4000, () => console.log("Server is running on 4000"));
