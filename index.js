@@ -130,7 +130,7 @@ app.get("/auth/me", verifyJWT, async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    res.status(200).json( user );
+    res.status(200).json(user);
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch users." });
   }
@@ -193,7 +193,11 @@ app.post("/tasks", async (req, res) => {
 
 async function getTasksByFilters(filters = {}) {
   try {
-    const tasks = await Task.find(filters);
+    const tasks = await Task.find(filters)
+      .populate("owners", "name email")
+      .populate("project", "name")
+      .populate("team", "name")
+      .populate("tags", "name");
     return tasks;
   } catch (err) {
     console.log(err);
@@ -258,6 +262,37 @@ app.get("/tasks", async (req, res) => {
     }
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch tasks" });
+  }
+});
+
+// Function to get details of one particular task
+
+async function getDetailsOfTask(id) {
+  try {
+    const taskDetails = await Task.findById(id)
+      .populate("owners", "name email")
+      .populate("project", "name")
+      .populate("team", "name")
+      .populate("tags", "name");
+    return taskDetails;
+  } catch (err) {
+    console.log(err);
+    throw err;
+  }
+}
+
+// API route to get task details by id
+
+app.get("/tasks/:id", async (req, res) => {
+  try {
+    const taskDetails = await getDetailsOfTask(req.params.id);
+    if (taskDetails) {
+      res.status(200).json(taskDetails);
+    } else {
+      res.status(404).json({ message: "Task doesn't exist" });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch task details" });
   }
 });
 
@@ -360,7 +395,7 @@ app.get("/teams", async (req, res) => {
   try {
     const teams = await getAllTeams();
     if (teams.length != 0) {
-      res.status(200).json({ teams });
+      res.status(200).json( teams );
     } else {
       res.status(404).json({ message: "No teams found." });
     }
@@ -415,7 +450,7 @@ app.get("/projects", async (req, res) => {
   try {
     const projects = await getAllProjects();
     if (projects.length != 0) {
-      res.status(200).json({ projects });
+      res.status(200).json(projects);
     } else {
       res.status(404).json({ message: "No projects found." });
     }
