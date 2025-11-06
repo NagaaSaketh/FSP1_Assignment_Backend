@@ -232,7 +232,7 @@ app.get("/tasks", async (req, res) => {
       if (!user) {
         return res.status(404).json({ error: "No owner found" });
       }
-      filters.owner = user._id;
+      filters.owners = { $in: [user._id] };
     }
 
     if (tags) {
