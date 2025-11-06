@@ -154,7 +154,7 @@ app.get("/users", async (req, res) => {
   try {
     const users = await getAllUsers();
     if (users.length != 0) {
-      res.status(200).json({ users });
+      res.status(200).json(users);
     } else {
       res.status(404).json({ message: "No Users found." });
     }
@@ -169,7 +169,13 @@ async function createTask(newTask) {
   try {
     const task = new Task(newTask);
     const savedTask = await task.save();
-    return savedTask;
+    const populatedTask = await Task.findById(savedTask._id)
+      .populate("owners", "name email")
+      .populate("project", "name")
+      .populate("team", "name")
+      .populate("tags", "name");
+
+    return populatedTask;
   } catch (err) {
     console.log(err);
     throw err;
@@ -395,7 +401,7 @@ app.get("/teams", async (req, res) => {
   try {
     const teams = await getAllTeams();
     if (teams.length != 0) {
-      res.status(200).json( teams );
+      res.status(200).json(teams);
     } else {
       res.status(404).json({ message: "No teams found." });
     }
@@ -403,6 +409,33 @@ app.get("/teams", async (req, res) => {
     res.status(500).json({ message: "Failed to fetch teams" });
   }
 });
+
+// Function to delete team 
+
+async function deleteTeam(id) {
+  try{
+    const team = await Team.findByIdAndDelete(id);
+    return team;
+  }catch(err){
+    console.log(err);
+    throw err;
+  }
+}
+
+// API route to delete a team
+
+app.delete("/teams/:id",async(req,res)=>{
+  try{
+    const team = await deleteTeam(req.params.id);
+    if(team){
+      res.status(200).json(team)
+    }else{
+      res.status(404).json({message:"No team found"})
+    }
+  }catch(err){
+    res.status(500).json({message:"Failed to delete team"})
+  }
+})
 
 // Function to create a new project
 
@@ -459,6 +492,33 @@ app.get("/projects", async (req, res) => {
   }
 });
 
+// Function to delete project
+
+async function deleteProject(id) {
+  try{
+    const deletedProject = await Project.findByIdAndDelete(id);
+    return deletedProject;
+  }catch(err){
+    console.log(err);
+    throw err;
+  }
+}
+
+// API route to delete a project by id
+
+app.delete("/projects/:id",async(req,res)=>{
+  try{
+    const project = await deleteProject(req.params.id);
+    if(project){
+      res.status(200).json(project)
+    }else{
+      res.status(404).json({message:"No project found"})
+    }
+  }catch(err){
+    res.status(500).json({message:"Failed to delete project"})
+  }
+})
+
 // Function to create new tags
 
 async function createTags(tags) {
@@ -478,7 +538,7 @@ app.post("/tags", async (req, res) => {
   try {
     const tags = await createTags(req.body);
     if (tags) {
-      res.status(201).json({ tags });
+      res.status(201).json(tags);
     }
   } catch (err) {
     res.status(500).json({ error: "Failed to create tags" });
@@ -503,7 +563,7 @@ app.get("/tags", async (req, res) => {
   try {
     const tags = await getAllTags();
     if (tags.length != 0) {
-      res.status(200).json({ tags });
+      res.status(200).json(tags);
     } else {
       res.status(404).json({ message: "No tags found." });
     }
@@ -536,7 +596,7 @@ app.get("/report/last-week", async (req, res) => {
   try {
     const report = await getReportByLastWeek();
     if (report.length != 0) {
-      res.status(200).json({ report });
+      res.status(200).json(report);
     } else {
       res.status(404).json({ message: "No tasks found." });
     }
@@ -570,7 +630,7 @@ app.get("/report/pending", async (req, res) => {
   try {
     const report = await getTotalPendingDays();
     if (report) {
-      res.status(200).json({ report });
+      res.status(200).json(report);
     }
   } catch (err) {
     res
@@ -585,42 +645,68 @@ async function getClosedTasksByGroup(groupBy) {
   try {
     const validGroups = ["team", "owner", "project"];
     if (!validGroups.includes(groupBy)) {
-      throw new Error("Invalid group , Must be team , owner or project");
+      throw new Error("Invalid group. Must be 'team', 'owner', or 'project'.");
     }
+    const lookupConfig = {
+      team: {
+        from: "teams",
+        localField: "team",
+        foreignField: "_id",
+        as: "team",
+      },
+      owner: {
+        from: "new_users",
+        localField: "owners",
+        foreignField: "_id",
+        as: "owner",
+      },
+      project: {
+        from: "projects",
+        localField: "project",
+        foreignField: "_id",
+        as: "project",
+      },
+    }[groupBy];
+
     const results = await Task.aggregate([
+      { $match: { status: "Completed" } },
+      { $lookup: lookupConfig },
       {
-        $match: { status: "Completed" },
+        $unwind: {
+          path: `$${groupBy}`,
+          preserveNullAndEmptyArrays: true, 
+        },
       },
       {
         $group: {
-          _id: `$${groupBy}`,
+          _id: `$${groupBy}._id`,
+          name: { $first: `$${groupBy}.name` },
           count: { $sum: 1 },
           tasks: { $push: "$$ROOT" },
         },
       },
-      {
-        $sort: { count: -1 },
-      },
+      { $sort: { count: -1 } },
     ]);
 
     return results;
   } catch (err) {
-    console.log(err);
+    console.error("Error in getClosedTasksByGroup:", err);
     throw err;
   }
 }
+
 // API route to fetch closed tasks by team,owner or project
 app.get("/report/closed-tasks", async (req, res) => {
   try {
     const groupBy = req.query.groupBy || "team";
-
     const results = await getClosedTasksByGroup(groupBy);
 
-    if (results && results.length > 0) {
+    if (results.length > 0) {
       res.status(200).json({
         groupedBy: groupBy,
         results: results.map((item) => ({
-          [groupBy]: item._id,
+          id: item._id,
+          name: item.name || "Unnamed",
           completedTaskCount: item.count,
           tasks: item.tasks,
         })),
@@ -639,4 +725,5 @@ app.get("/report/closed-tasks", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch closed tasks report." });
   }
 });
+
 app.listen(4000, () => console.log("Server is running on 4000"));
